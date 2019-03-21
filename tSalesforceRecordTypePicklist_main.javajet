@@ -1,0 +1,134 @@
+<%@ jet
+  imports="
+    org.talend.core.model.process.INode
+    org.talend.core.model.process.ElementParameterParser
+    org.talend.core.model.metadata.IMetadataTable
+    org.talend.core.model.metadata.IMetadataColumn
+    org.talend.core.model.process.IConnection
+    org.talend.core.model.process.IConnectionCategory
+    org.talend.designer.codegen.config.CodeGeneratorArgument
+    org.talend.core.model.metadata.types.JavaTypesManager
+    org.talend.core.model.metadata.types.JavaType
+    java.io.BufferedReader
+    java.io.File
+    java.io.FileReader
+    java.util.LinkedHashMap
+    java.util.HashSet
+    java.util.Set
+    java.util.Map
+    java.util.Map.Entry
+    javax.xml.parsers.DocumentBuilder
+    javax.xml.parsers.DocumentBuilderFactory
+    javax.xml.transform.OutputKeys
+    javax.xml.transform.Transformer
+    javax.xml.transform.TransformerFactory
+    javax.xml.transform.dom.DOMSource
+    javax.xml.transform.stream.StreamResult
+    javax.xml.transform.stream.StreamSource
+    org.w3c.dom.Document
+    org.w3c.dom.Element
+    org.w3c.dom.Node
+    org.w3c.dom.NodeList 
+  "
+%>
+<%
+  CodeGeneratorArgument codeGenArgument = (CodeGeneratorArgument) argument;
+  INode node = (INode)codeGenArgument.getArgument();
+  String cid = node.getUniqueName(); 
+  String csvFilePath = (String) ElementParameterParser.getObjectValue(node, "__CSVFOLDER__");
+  Integer valuePosition = Integer.valueOf((String)ElementParameterParser.getObjectValue(node, "__VALUEPOSITION__"));
+  String metadataFilePath = (String) ElementParameterParser.getObjectValue(node, "__METADATAFOLDER__");
+  String configFilePath = (String) ElementParameterParser.getObjectValue(node, "__CONFIGURATIONFOLDER__");
+  String fileName = (String) ElementParameterParser.getObjectValue(node, "__FILENAME__");
+  String picklistName = (String) ElementParameterParser.getObjectValue(node, "__PICKLISTFIELDNAME__");
+  String recordTypeName = (String) ElementParameterParser.getObjectValue(node, "__RECORDTYPENAME__");
+  String picklistFileName = (String) ElementParameterParser.getObjectValue(node, "__PICKLISTFILENAME__");
+  Boolean hasHeader = (Boolean) ElementParameterParser.getObjectValue(node, "__HASHEADER__");
+
+  String RECORDTYPE_TAG = (String) ElementParameterParser.getObjectValue(node, "__RECORDTYPE_TAG__");
+  String FULLNAME_TAG = (String) ElementParameterParser.getObjectValue(node, "__FULLNAME_TAG__");
+  String PICKLISTVALUES_TAG = (String) ElementParameterParser.getObjectValue(node, "__PICKLISTVALUES_TAG__");
+  String PICKLIST_TAG = (String) ElementParameterParser.getObjectValue(node, "__PICKLIST_TAG__");
+  String VALUES_TAG = (String) ElementParameterParser.getObjectValue(node, "__VALUES_TAG__");
+  String DEFAULT_TAG = (String) ElementParameterParser.getObjectValue(node, "__DEFAULT_TAG__");
+  String CSV_DELIMITER = (String) ElementParameterParser.getObjectValue(node, "__CSV_DELIMITER__");
+%>
+try {
+  java.io.File inputFile = new java.io.File(<%=metadataFilePath %>+<%=fileName %>);
+  
+  javax.xml.parsers.DocumentBuilderFactory dbFactory = javax.xml.parsers.DocumentBuilderFactory.newInstance();
+  javax.xml.parsers.DocumentBuilder dBuilder = dbFactory.newDocumentBuilder();
+  org.w3c.dom.Document doc = dBuilder.parse(inputFile);
+      
+  doc.getDocumentElement().normalize();
+  
+  org.w3c.dom.NodeList recordTypesNodes = doc.getElementsByTagName(<%=RECORDTYPE_TAG %>);
+      
+  Boolean rtFound = false;
+  Integer rtIndex = 0;
+  while(!rtFound) {
+    org.w3c.dom.Node recordTypesNode = recordTypesNodes.item(rtIndex);
+    if (recordTypesNode.getNodeType() == org.w3c.dom.Node.ELEMENT_NODE) {
+      org.w3c.dom.Element recordTypeElement = (org.w3c.dom.Element) recordTypesNode;
+      String fullName = recordTypeElement.getElementsByTagName(<%=FULLNAME_TAG %>).item(0).getTextContent();
+      if(fullName.equalsIgnoreCase(<%=recordTypeName %>)) {        			
+        rtFound = true;
+        org.w3c.dom.NodeList picklistValuesNodes = doc.getElementsByTagName(<%=PICKLISTVALUES_TAG %>);
+
+        Boolean pvFound = false;
+        Integer pvIndex = 0;
+        while(!pvFound) {
+          org.w3c.dom.Node picklistValueNode = picklistValuesNodes.item(pvIndex);
+          if (picklistValueNode.getNodeType() == org.w3c.dom.Node.ELEMENT_NODE) {
+            org.w3c.dom.Element picklistValuesElement = (org.w3c.dom.Element) picklistValueNode;
+            String picklistFullName = picklistValuesElement.getElementsByTagName(<%=PICKLIST_TAG %>).item(0).getTextContent();
+            if(picklistFullName.equalsIgnoreCase(<%=picklistName %>)) {  
+              pvFound = true;
+              org.w3c.dom.NodeList valuesNodes = picklistValuesElement.getElementsByTagName(<%=VALUES_TAG %>);
+              while (valuesNodes.getLength() > 0) {
+                  picklistValuesElement.removeChild(valuesNodes.item(0));
+              }
+              String line = "";
+              java.io.BufferedReader br = new java.io.BufferedReader(new java.io.FileReader(<%=csvFilePath %>+<%=picklistFileName %>));
+              java.util.Set<String> picklistEntries = new java.util.HashSet<String>();
+              Boolean skipLine = <%=hasHeader %>;
+              while ((line = br.readLine()) != null) {
+                if(!skipLine) {
+                  String[] valueTokens = line.split(<%=CSV_DELIMITER %>);
+                  picklistEntries.add(valueTokens[<%=valuePosition %>]);
+                } else {
+                  skipLine = false;
+                }
+              }
+              br.close();
+              for (String entry : picklistEntries){
+                org.w3c.dom.Element values = doc.createElement(<%=VALUES_TAG %>);
+                picklistValuesElement.appendChild(values);
+                org.w3c.dom.Element valueFullName = doc.createElement(<%=FULLNAME_TAG %>);
+                valueFullName.setTextContent(entry.replaceAll("\"", ""));
+                values.appendChild(valueFullName);
+                org.w3c.dom.Element defaultElement = doc.createElement(<%=DEFAULT_TAG %>);
+                defaultElement.setTextContent("false");
+                values.appendChild(defaultElement);
+              }
+            } 
+          }
+          pvIndex++;
+        }
+        //transform the DOM Object to an XML java.io.File
+        javax.xml.transform.Transformer transformer = javax.xml.transform.TransformerFactory.newInstance().newTransformer(new javax.xml.transform.stream.StreamSource(<%=configFilePath %>+"strip-space.xsl"));
+        transformer.setOutputProperty(javax.xml.transform.OutputKeys.INDENT, "yes");
+        transformer.setOutputProperty("{http://xml.apache.org/xslt}indent-amount", "4");
+        javax.xml.transform.dom.DOMSource domSource = new javax.xml.transform.dom.DOMSource(doc);
+        javax.xml.transform.stream.StreamResult streamResult = new javax.xml.transform.stream.StreamResult(new java.io.File(<%=metadataFilePath %>+<%=fileName %>));
+        
+        transformer.transform(domSource, streamResult);
+      }
+    }
+    rtIndex++;
+  }
+} catch (Exception e) {
+    System.out.println("Error message" + e.getMessage());
+    System.out.println("Error message" + e.getCause());
+    e.printStackTrace();
+}
